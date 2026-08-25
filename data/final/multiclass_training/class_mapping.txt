@@ -1,0 +1,7 @@
+0 = BENIGN
+1 = DoS_DDoS
+2 = PortScan
+3 = BruteForce
+4 = WebAttack
+5 = Bot
+6 = Infiltration
