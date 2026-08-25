@@ -1,0 +1,15 @@
+# AI-NIDS Python dependencies
+# Recommended: Python 3.11/3.12 for broad package compatibility.
+# The existing project environment uses Python 3.13.
+#
+# If NVIDIA GPU acceleration is required, install the CUDA-compatible
+# PyTorch build from https://pytorch.org/get-started/locally/
+
+numpy
+pandas
+scikit-learn==1.7.2
+joblib
+streamlit
+scapy
+cicflowmeter
+torch
