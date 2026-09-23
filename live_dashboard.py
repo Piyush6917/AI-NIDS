@@ -7,240 +7,183 @@ import streamlit as st
 from live_backend import LiveNIDS
 
 
-# ============================================================
-# PAGE CONFIG
-# ============================================================
-
 st.set_page_config(
-    page_title="AI-NIDS Live Monitor",
+    page_title="AI-NIDS Security Monitor",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-
-# ============================================================
-# CUSTOM CSS
-# ============================================================
-
-st.markdown(
-    """
-    <style>
-
-    .main {
-        background-color: #0e1117;
-    }
-
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-        max-width: 1500px;
-    }
-
-    .title {
-        font-size: 42px;
-        font-weight: 800;
-        margin-bottom: 5px;
-    }
-
-    .subtitle {
-        color: #8b949e;
-        font-size: 16px;
-        margin-bottom: 25px;
-    }
-
-    .status-box {
-        padding: 16px 20px;
-        border-radius: 10px;
-        margin-bottom: 20px;
-        font-size: 17px;
-        font-weight: 700;
-    }
-
-    .status-live {
-        background: #073b27;
-        border: 1px solid #238636;
-        color: #3fb950;
-    }
-
-    .status-stop {
-        background: #3b2610;
-        border: 1px solid #d29922;
-        color: #d29922;
-    }
-
-    .attack-box {
-        background: #4b1515;
-        border: 1px solid #f85149;
-        color: #ff7b72;
-        padding: 20px;
-        border-radius: 10px;
-        font-size: 20px;
-        font-weight: 800;
-    }
-
-    .benign-box {
-        background: #073b27;
-        border: 1px solid #238636;
-        color: #3fb950;
-        padding: 20px;
-        border-radius: 10px;
-        font-size: 20px;
-        font-weight: 800;
-    }
-
-    .pipeline {
-        background: #161b22;
-        border-radius: 10px;
-        padding: 20px;
-        line-height: 2;
-        border: 1px solid #30363d;
-    }
-
-    .flow-card {
-        background: #161b22;
-        border: 1px solid #30363d;
-        border-radius: 10px;
-        padding: 20px;
-        margin-bottom: 20px;
-    }
-
-    .flow-label {
-        color: #8b949e;
-        font-size: 14px;
-    }
-
-    .flow-value {
-        font-size: 22px;
-        font-weight: 700;
-    }
-
-    div[data-testid="stMetric"] {
-        background-color: #161b22;
-        border: 1px solid #30363d;
-        padding: 15px;
-        border-radius: 10px;
-    }
-
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-
-# ============================================================
-# SESSION STATE
-# ============================================================
-
 if "nids" not in st.session_state:
     st.session_state.nids = LiveNIDS()
+
+if "started_at" not in st.session_state:
+    st.session_state.started_at = None
+
+if "selected_interface" not in st.session_state:
+    st.session_state.selected_interface = "Wi-Fi"
+
+if "capture_mode" not in st.session_state:
+    st.session_state.capture_mode = "LAB"
 
 nids = st.session_state.nids
 
 
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
-
-def running_status():
-    """
-    Supports both:
-        nids.is_running
-    and
-        nids.is_running()
-    """
-    try:
-        value = nids.is_running
-
-        if callable(value):
-            return bool(value())
-
-        return bool(value)
-
-    except Exception:
-        return False
+def running():
+    value = nids.is_running
+    return bool(value() if callable(value) else value)
 
 
-def safe_get(name, default=0):
-    try:
-        return getattr(nids, name, default)
-    except Exception:
-        return default
-
-
-def prediction_dataframe():
-    predictions = safe_get("predictions", [])
-
-    if not predictions:
-        return pd.DataFrame()
-
-    try:
-        df = pd.DataFrame(predictions)
-    except Exception:
-        return pd.DataFrame()
-
-    return df
-
-
-def format_probability(value):
+def pct(value):
     try:
         return f"{float(value) * 100:.2f}%"
     except Exception:
         return "0.00%"
 
 
-def get_device():
-    try:
-        device = getattr(nids, "device", None)
+def elapsed():
+    if st.session_state.started_at is None:
+        return "00:00:00"
 
-        if device is None:
-            return "Unknown"
+    seconds = int(
+        (datetime.now() - st.session_state.started_at).total_seconds()
+    )
 
-        return str(device).upper()
+    h = seconds // 3600
+    m = (seconds % 3600) // 60
+    s = seconds % 60
 
-    except Exception:
-        return "Unknown"
+    return f"{h:02d}:{m:02d}:{s:02d}"
 
 
-# ============================================================
-# SIDEBAR
-# ============================================================
+# -----------------------------
+# CSS
+# -----------------------------
+
+st.markdown(
+    """
+    <style>
+    .stApp { background:#0b0f14; }
+    [data-testid="stSidebar"] { background:#0d1219; }
+
+    .hero {
+        background:#111821;
+        border:1px solid #26303b;
+        border-radius:16px;
+        padding:25px;
+        margin-bottom:18px;
+    }
+
+    .hero h1 { margin:0; font-size:38px; }
+    .muted { color:#8492a2; }
+
+    .status {
+        padding:13px 18px;
+        border-radius:12px;
+        font-weight:800;
+        margin-bottom:18px;
+    }
+
+    .online {
+        background:#063b27;
+        color:#3fb950;
+        border:1px solid #238636;
+    }
+
+    .offline {
+        background:#3b2b0d;
+        color:#d29922;
+        border:1px solid #9e6a03;
+    }
+
+    .attack {
+        background:#351416;
+        border:1px solid #8b2d31;
+        border-radius:14px;
+        padding:20px;
+    }
+
+    .benign {
+        background:#0b2d20;
+        border:1px solid #238636;
+        border-radius:14px;
+        padding:20px;
+    }
+
+    .attack-title {
+        font-size:25px;
+        font-weight:850;
+    }
+
+    .health {
+        background:#111821;
+        border:1px solid #26303b;
+        border-radius:14px;
+        padding:18px;
+    }
+
+    .lab-box {
+        background:#111821;
+        border:1px solid #26303b;
+        border-radius:14px;
+        padding:18px;
+        margin-bottom:12px;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# -----------------------------
+# Sidebar
+# -----------------------------
 
 with st.sidebar:
-
-    st.markdown("## ⚙️ Live Capture")
-
-    st.markdown("### Network Interface")
-
-    interface = st.selectbox(
-        "Select network interface",
-        [
-            "Wi-Fi",
-            "Ethernet",
-        ],
-        index=0,
-        label_visibility="collapsed",
-    )
+    st.markdown("# 🛡️ AI-NIDS")
+    st.caption("Security Operations Center")
 
     st.divider()
 
-    running = running_status()
+    st.markdown("### 🎛️ Capture Control")
 
-    if running:
+    mode = st.radio(
+        "Capture mode",
+        ["LAB", "REAL"],
+        index=0 if st.session_state.capture_mode == "LAB" else 1,
+        help="LAB uses the isolated Docker test network. REAL captures Wi-Fi/Ethernet.",
+    )
+
+    st.session_state.capture_mode = mode
+
+    if mode == "REAL":
+        interface = st.selectbox(
+            "Network interface",
+            ["Wi-Fi", "Ethernet"],
+            index=(
+                0
+                if st.session_state.selected_interface == "Wi-Fi"
+                else 1
+            ),
+        )
+        st.session_state.selected_interface = interface
+
+    else:
+        interface = "Docker Lab / nids-client"
+
+    if running():
+        st.success(f"Capture process is running ({mode}).")
 
         if st.button(
             "■ Stop Live Monitoring",
             use_container_width=True,
         ):
-            try:
-                nids.stop_capture()
-                st.success("Live monitoring stopped.")
-                st.rerun()
-
-            except Exception as e:
-                st.error(f"Unable to stop monitoring: {e}")
+            nids.stop_capture()
+            st.session_state.started_at = None
+            st.rerun()
 
     else:
+        st.warning("Capture is stopped.")
 
         if st.button(
             "▶ Start Live Monitoring",
@@ -248,372 +191,267 @@ with st.sidebar:
             use_container_width=True,
         ):
             try:
+                if mode == "LAB":
+                    nids.start_lab_capture()
+                else:
+                    nids.start_real_capture(interface)
 
-                # Current backend starts the configured capture
-                # process itself.
-                nids.start_capture(interface)
-
-                st.success("Live monitoring started.")
-                time.sleep(0.5)
+                st.session_state.started_at = datetime.now()
                 st.rerun()
 
-            except Exception as e:
-                st.error(f"Unable to start monitoring: {e}")
+            except Exception as exc:
+                st.error(
+                    "Unable to start monitoring:\n"
+                    + str(exc)
+                )
 
     st.divider()
 
-    st.markdown("### AI Pipeline")
-
-    st.markdown(
-        """
-        <div class="pipeline">
-
-        <b>Wi-Fi</b>
-
-        ↓
-
-        <b>CICFlowMeter</b>
-
-        ↓
-
-        <b>61 Features</b>
-
-        ↓
-
-        <b>StandardScaler</b>
-
-        ↓
-
-        <b>Binary Transformer</b>
-
-        ↓
-
-        <b>Multi-class Transformer V2</b>
-
-        ↓
-
-        <b>AI Prediction</b>
-
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown("### ⚡ Runtime")
+    st.metric("Interface", interface)
+    st.metric("Mode", mode)
+    st.metric("Inference", str(nids.device).upper())
+    st.metric("Capture Time", elapsed())
 
     st.divider()
 
-    st.caption("AI-NIDS")
-    st.caption("Real-time Network Intrusion Detection")
+    st.markdown("### 🧠 AI Pipeline")
+
+    if mode == "LAB":
+        st.code(
+            """Docker Lab
+  ↓
+nids-client
+  ↓
+tcpdump PCAP
+  ↓
+CICFlowMeter
+  ↓
+61 Features
+  ↓
+StandardScaler
+  ↓
+Binary Transformer
+  ↓
+Multi-class Transformer
+  ↓
+Prediction""",
+            language="text",
+        )
+    else:
+        st.code(
+            """Wi-Fi / Ethernet
+  ↓
+CICFlowMeter
+  ↓
+61 Features
+  ↓
+StandardScaler
+  ↓
+Binary Transformer
+  ↓
+Multi-class Transformer
+  ↓
+Prediction""",
+            language="text",
+        )
 
 
-# ============================================================
-# HEADER
-# ============================================================
+# -----------------------------
+# Backend processing
+# -----------------------------
+
+if running():
+    nids.process_new_flows()
+
+
+df = pd.DataFrame(nids.predictions)
+
+total = nids.total_flows
+benign = nids.total_benign
+attacks = nids.total_attacks
+high = nids.high_severity
+
+attack_rate = attacks / total * 100 if total else 0
+
+
+# -----------------------------
+# Header
+# -----------------------------
 
 st.markdown(
-    '<div class="title">🛡️ AI-NIDS Live Monitor</div>',
-    unsafe_allow_html=True,
-)
-
-st.markdown(
-    '<div class="subtitle">'
-    "Real Wi-Fi traffic capture → CICFlowMeter → 61 features → "
-    "Transformer AI detection"
-    "</div>",
-    unsafe_allow_html=True,
-)
-
-
-# ============================================================
-# PROCESS NEW FLOWS
-# ============================================================
-
-if running:
-
-    try:
-        nids.process_new_flows()
-
-    except Exception as e:
-        st.session_state.last_processing_error = repr(e)
-
-
-# ============================================================
-# STATUS
-# ============================================================
-
-running = running_status()
-
-if running:
-
-    st.markdown(
-        """
-        <div class="status-box status-live">
-        🟢 LIVE CAPTURE ACTIVE
+    """
+    <div class="hero">
+        <h1>🛡️ AI-NIDS Security Monitor</h1>
+        <div class="muted">
+            Real-time network-flow analysis powered by Transformer AI
         </div>
-        """,
-        unsafe_allow_html=True,
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+if running():
+    status_text = (
+        "🟢 LAB CAPTURE ACTIVE — Isolated traffic is being monitored automatically"
+        if nids.capture_mode == "LAB"
+        else "🟢 REAL CAPTURE ACTIVE — Traffic is being captured automatically"
     )
 
+    st.markdown(
+        f'<div class="status online">{status_text}</div>',
+        unsafe_allow_html=True,
+    )
 else:
-
     st.markdown(
-        """
-        <div class="status-box status-stop">
-        🟡 LIVE CAPTURE STOPPED
-        </div>
-        """,
+        '<div class="status offline">🟡 CAPTURE STOPPED</div>',
         unsafe_allow_html=True,
     )
 
 
-# ============================================================
-# TOP METRICS
-# ============================================================
+# -----------------------------
+# KPIs
+# -----------------------------
 
-total_flows = int(safe_get("total_flows", 0))
-total_benign = int(safe_get("total_benign", 0))
-total_attacks = int(safe_get("total_attacks", 0))
-high_severity = int(safe_get("high_severity", 0))
+c1, c2, c3, c4, c5 = st.columns(5)
 
-attack_rate = (
-    (total_attacks / total_flows) * 100
-    if total_flows > 0
-    else 0
-)
-
-device = get_device()
-
-m1, m2, m3, m4, m5 = st.columns(5)
-
-with m1:
-    st.metric(
-        "Device",
-        device,
-    )
-
-with m2:
-    st.metric(
-        "Total Flows",
-        f"{total_flows:,}",
-    )
-
-with m3:
-    st.metric(
-        "Benign",
-        f"{total_benign:,}",
-    )
-
-with m4:
-    st.metric(
-        "Attacks",
-        f"{total_attacks:,}",
-    )
-
-with m5:
-    st.metric(
-        "High Severity",
-        f"{high_severity:,}",
-    )
-
+c1.metric("Total Flows", f"{total:,}")
+c2.metric("Benign", f"{benign:,}")
+c3.metric("Attacks", f"{attacks:,}")
+c4.metric("High Severity", f"{high:,}")
+c5.metric("Attack Rate", f"{attack_rate:.2f}%")
 
 st.divider()
 
 
-# ============================================================
-# CURRENT FLOW
-# ============================================================
+# -----------------------------
+# LAB CONTROL PANEL
+# -----------------------------
 
-st.markdown("## 🔎 Current Flow Detection")
+if mode == "LAB":
+    st.subheader("🧪 Controlled Lab Traffic")
 
-df = prediction_dataframe()
+    st.markdown(
+        """
+        <div class="lab-box">
+        <b>Isolated test environment</b><br>
+        <span class="muted">
+        Traffic is generated only between the Docker lab client and the
+        local OWASP Juice Shop target. No external target is used.
+        </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if not running():
+        st.info("Start LAB monitoring first, then run a traffic scenario.")
+
+    a1, a2, a3, a4 = st.columns(4)
+
+    with a1:
+        if st.button(
+            "🟢 Normal Traffic",
+            use_container_width=True,
+            disabled=not running(),
+        ):
+            try:
+                nids.run_lab_action("normal")
+                st.success("Normal browsing traffic started.")
+            except Exception as exc:
+                st.error(str(exc))
+
+    with a2:
+        if st.button(
+            "🔴 Port Scan Test",
+            use_container_width=True,
+            disabled=not running(),
+        ):
+            try:
+                nids.run_lab_action("portscan")
+                st.warning("Controlled port-scan test started.")
+            except Exception as exc:
+                st.error(str(exc))
+
+    with a3:
+        if st.button(
+            "🟠 Web Security Test",
+            use_container_width=True,
+            disabled=not running(),
+        ):
+            try:
+                nids.run_lab_action("webtest")
+                st.warning("Local web-security test started.")
+            except Exception as exc:
+                st.error(str(exc))
+
+    with a4:
+        if st.button(
+            "🔴 Stress Test (8s)",
+            use_container_width=True,
+            disabled=not running(),
+        ):
+            try:
+                nids.run_lab_action("stress")
+                st.warning("Bounded local stress test started.")
+            except Exception as exc:
+                st.error(str(exc))
+
+    if nids.lab_action_running:
+        st.info(
+            f"Lab scenario running: {getattr(nids, 'lab_action_name', 'test')}"
+        )
+        if st.button("■ Stop Current Lab Test"):
+            nids.stop_lab_action()
+            st.rerun()
+
+    if nids.last_lab_message:
+        st.caption("Lab: " + nids.last_lab_message)
+
+    st.divider()
+
+
+# -----------------------------
+# Current Detection
+# -----------------------------
+
+st.subheader("🔎 Current Flow Detection")
 
 if df.empty:
-
     st.info(
-        "Waiting for live network flows..."
+        "Waiting for network flows. "
+        "In LAB mode, start monitoring and use the traffic buttons above."
     )
-
 else:
-
     latest = df.iloc[-1]
 
-    prediction = str(
-        latest.get("prediction", "UNKNOWN")
+    prediction = str(latest.get("prediction", "UNKNOWN"))
+    probability = float(latest.get("attack_probability", 0))
+    family = str(latest.get("attack_family", "UNKNOWN"))
+    confidence = float(latest.get("family_confidence", 0))
+    severity = str(latest.get("severity", "NONE"))
+
+    src = f"{latest.get('src_ip', '')}:{latest.get('src_port', '')}"
+    dst = f"{latest.get('dst_ip', '')}:{latest.get('dst_port', '')}"
+
+    css = "attack" if prediction == "ATTACK" else "benign"
+    title = (
+        "🚨 ATTACK DETECTED"
+        if prediction == "ATTACK"
+        else "🟢 BENIGN TRAFFIC"
     )
-
-    attack_probability = latest.get(
-        "attack_probability",
-        0,
-    )
-
-    family = str(
-        latest.get(
-            "attack_family",
-            "UNKNOWN",
-        )
-    )
-
-    confidence = latest.get(
-        "family_confidence",
-        0,
-    )
-
-    severity = str(
-        latest.get(
-            "severity",
-            "NONE",
-        )
-    )
-
-    src_ip = latest.get(
-        "src_ip",
-        "",
-    )
-
-    src_port = latest.get(
-        "src_port",
-        "",
-    )
-
-    dst_ip = latest.get(
-        "dst_ip",
-        "",
-    )
-
-    dst_port = latest.get(
-        "dst_port",
-        "",
-    )
-
-    protocol = latest.get(
-        "protocol",
-        "",
-    )
-
-    timestamp = latest.get(
-        "timestamp",
-        "",
-    )
-
-
-    # --------------------------------------------------------
-    # Prediction Banner
-    # --------------------------------------------------------
-
-    if prediction == "ATTACK":
-
-        st.markdown(
-            """
-            <div class="attack-box">
-            🚨 ATTACK DETECTED
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    else:
-
-        st.markdown(
-            """
-            <div class="benign-box">
-            🟢 BENIGN TRAFFIC
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-    st.write("")
-
-
-    c1, c2, c3, c4 = st.columns(4)
-
-    with c1:
-
-        st.markdown(
-            '<div class="flow-label">Prediction</div>',
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
-            f'<div class="flow-value">{prediction}</div>',
-            unsafe_allow_html=True,
-        )
-
-
-    with c2:
-
-        st.markdown(
-            '<div class="flow-label">Attack Probability</div>',
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
-            f'<div class="flow-value">'
-            f'{format_probability(attack_probability)}'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
-
-
-    with c3:
-
-        st.markdown(
-            '<div class="flow-label">Attack Family</div>',
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
-            f'<div class="flow-value">{family}</div>',
-            unsafe_allow_html=True,
-        )
-
-
-    with c4:
-
-        st.markdown(
-            '<div class="flow-label">Severity</div>',
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
-            f'<div class="flow-value">{severity}</div>',
-            unsafe_allow_html=True,
-        )
-
-
-    st.write("")
-
 
     st.markdown(
         f"""
-        <div class="flow-card">
-
-        <span class="flow-label">Flow</span><br>
-
-        <code>
-        {src_ip}:{src_port}
-        →
-        {dst_ip}:{dst_port}
-        </code>
-
-        <br><br>
-
-        <span class="flow-label">Protocol</span><br>
-
-        <code>{protocol}</code>
-
-        &nbsp;&nbsp;&nbsp;
-
-        <span class="flow-label">Family Confidence</span><br>
-
-        <code>{format_probability(confidence)}</code>
-
-        &nbsp;&nbsp;&nbsp;
-
-        <span class="flow-label">Time</span><br>
-
-        <code>{timestamp}</code>
-
+        <div class="{css}">
+            <div class="attack-title">{title}</div>
+            <br>
+            <b>Flow:</b> {src} → {dst}<br>
+            <b>Protocol:</b> {latest.get('protocol', '')}<br>
+            <b>Attack probability:</b> {pct(probability)}<br>
+            <b>Attack family:</b> {family}<br>
+            <b>Family confidence:</b> {pct(confidence)}<br>
+            <b>Severity:</b> {severity}
         </div>
         """,
         unsafe_allow_html=True,
@@ -623,238 +461,145 @@ else:
 st.divider()
 
 
-# ============================================================
-# TRAFFIC ANALYTICS
-# ============================================================
+# -----------------------------
+# Charts
+# -----------------------------
 
-st.markdown("## 📊 Traffic Analytics")
+st.subheader("📊 Live Traffic Analytics")
 
 if df.empty:
-
-    st.info("Analytics will appear when traffic is captured.")
-
+    st.info("No traffic data yet.")
 else:
+    left, right = st.columns(2)
 
-    chart1, chart2 = st.columns(2)
-
-    # --------------------------------------------------------
-    # Flow count over time
-    # --------------------------------------------------------
-
-    with chart1:
-
-        st.markdown("### 📈 Flow Activity")
-
-        temp = df.copy()
-
-        temp["Flow Number"] = range(
-            1,
-            len(temp) + 1,
-        )
-
-        temp["Flows"] = 1
-
-        flow_chart = (
-            temp[
-                [
-                    "Flow Number",
-                    "Flows",
-                ]
-            ]
-            .set_index("Flow Number")
-        )
-
-        st.line_chart(
-            flow_chart,
-            height=300,
-        )
-
-
-    # --------------------------------------------------------
-    # Benign vs Attack
-    # --------------------------------------------------------
-
-    with chart2:
-
-        st.markdown("### 📊 Benign vs Attack")
-
-        chart_data = pd.DataFrame(
+    with left:
+        st.markdown("**Flow count over session**")
+        activity = pd.DataFrame(
             {
-                "Traffic": [
-                    "Benign",
-                    "Attack",
-                ],
-                "Count": [
-                    total_benign,
-                    total_attacks,
-                ],
+                "Flows": range(1, len(df) + 1),
+                "Total": 1,
             }
         )
+        st.line_chart(activity.set_index("Flows"))
 
+    with right:
+        st.markdown("**Benign vs Attack**")
         st.bar_chart(
-            chart_data.set_index("Traffic"),
-            height=300,
+            pd.DataFrame(
+                {"Count": [benign, attacks]},
+                index=["Benign", "Attack"],
+            )
         )
 
 
 st.divider()
 
 
-# ============================================================
-# ATTACK FAMILY DISTRIBUTION
-# ============================================================
+# -----------------------------
+# Attack intelligence
+# -----------------------------
 
-st.markdown("## 🧠 Attack Family Distribution")
+st.subheader("🧠 Network & Attack Intelligence")
 
-if df.empty:
+left, right = st.columns(2)
 
-    st.info(
-        "Attack-family statistics will appear here."
-    )
+with left:
+    st.markdown("**Attack families**")
+    if df.empty:
+        st.info("No predictions yet.")
+    else:
+        st.bar_chart(df["attack_family"].value_counts())
 
-else:
-
-    family_df = df.copy()
-
-    family_df["attack_family"] = (
-        family_df["attack_family"]
-        .fillna("UNKNOWN")
-        .astype(str)
-    )
-
-    family_counts = (
-        family_df["attack_family"]
-        .value_counts()
-        .rename("Count")
-        .to_frame()
-    )
-
-    st.bar_chart(
-        family_counts,
-        height=300,
-    )
+with right:
+    st.markdown("**Protocols**")
+    if df.empty:
+        st.info("No traffic yet.")
+    else:
+        st.bar_chart(df["protocol"].astype(str).value_counts())
 
 
 st.divider()
 
 
-# ============================================================
-# RECENT NETWORK TRAFFIC
-# ============================================================
+# -----------------------------
+# Alerts
+# -----------------------------
 
-st.markdown("## 🔬 Recent Network Traffic")
+st.subheader("🚨 Security Alerts")
 
 if df.empty:
+    st.info("No alerts.")
+else:
+    alerts = df[
+        df["prediction"].astype(str) == "ATTACK"
+    ].tail(10)
 
-    st.info(
-        "Waiting for live flows..."
+    if alerts.empty:
+        st.success("No attacks detected in this session.")
+    else:
+        for _, row in alerts.iloc[::-1].iterrows():
+            st.error(
+                f"🚨 {row.get('attack_family', 'UNKNOWN')} | "
+                f"{row.get('severity', 'MEDIUM')} | "
+                f"{row.get('src_ip', '')}:{row.get('src_port', '')} → "
+                f"{row.get('dst_ip', '')}:{row.get('dst_port', '')} | "
+                f"Probability: {pct(row.get('attack_probability', 0))}"
+            )
+
+
+st.divider()
+
+
+# -----------------------------
+# Recent traffic
+# -----------------------------
+
+st.subheader("📋 Recent Network Traffic")
+
+if df.empty:
+    st.info("Waiting for network flows.")
+else:
+    table = df.tail(100).copy()
+
+    table["Source"] = (
+        table["src_ip"].astype(str)
+        + ":"
+        + table["src_port"].astype(str)
     )
 
-else:
+    table["Destination"] = (
+        table["dst_ip"].astype(str)
+        + ":"
+        + table["dst_port"].astype(str)
+    )
 
-    display_df = df.copy()
+    table["Attack Probability"] = table["attack_probability"].apply(pct)
+    table["Confidence"] = table["family_confidence"].apply(pct)
 
-    # Keep latest 100 rows
-    display_df = display_df.tail(100)
-
-    # --------------------------------------------------------
-    # Format columns
-    # --------------------------------------------------------
-
-    if "timestamp" in display_df.columns:
-
-        display_df["Time"] = (
-            display_df["timestamp"]
-            .astype(str)
-        )
-
-    else:
-
-        display_df["Time"] = ""
-
-
-    if "src_ip" in display_df.columns:
-
-        display_df["Source"] = (
-            display_df["src_ip"].astype(str)
-            + ":"
-            + display_df["src_port"].astype(str)
-        )
-
-    else:
-
-        display_df["Source"] = ""
-
-
-    if "dst_ip" in display_df.columns:
-
-        display_df["Destination"] = (
-            display_df["dst_ip"].astype(str)
-            + ":"
-            + display_df["dst_port"].astype(str)
-        )
-
-    else:
-
-        display_df["Destination"] = ""
-
-
-    if "attack_probability" in display_df.columns:
-
-        display_df["Attack Probability"] = (
-            display_df["attack_probability"]
-            .apply(format_probability)
-        )
-
-    else:
-
-        display_df["Attack Probability"] = ""
-
-
-    if "family_confidence" in display_df.columns:
-
-        display_df["Confidence"] = (
-            display_df["family_confidence"]
-            .apply(format_probability)
-        )
-
-    else:
-
-        display_df["Confidence"] = ""
-
-
-    columns = [
-        "Time",
-        "Source",
-        "Destination",
-        "prediction",
-        "Attack Probability",
-        "attack_family",
-        "Confidence",
-        "severity",
-    ]
-
-    columns = [
-        x
-        for x in columns
-        if x in display_df.columns
-    ]
-
-
-    final_df = display_df[columns].copy()
-
-
-    final_df = final_df.rename(
+    table = table[
+        [
+            "timestamp",
+            "Source",
+            "Destination",
+            "protocol",
+            "prediction",
+            "Attack Probability",
+            "attack_family",
+            "Confidence",
+            "severity",
+        ]
+    ].rename(
         columns={
+            "timestamp": "Time",
+            "protocol": "Protocol",
             "prediction": "Prediction",
             "attack_family": "Family",
             "severity": "Severity",
         }
     )
 
-
     st.dataframe(
-        final_df,
+        table,
         use_container_width=True,
         hide_index=True,
         height=450,
@@ -864,82 +609,74 @@ else:
 st.divider()
 
 
-# ============================================================
-# SYSTEM INFORMATION
-# ============================================================
+# -----------------------------
+# System Health
+# -----------------------------
 
-st.markdown("## ⚙️ System Information")
+st.subheader("⚙️ System Health")
 
-info1, info2, info3 = st.columns(3)
-
-with info1:
-
-    st.metric(
-        "Attack Rate",
-        f"{attack_rate:.2f}%",
-    )
-
-with info2:
-
-    st.metric(
-        "Flows Analyzed",
-        f"{total_flows:,}",
-    )
-
-with info3:
-
-    if total_flows > 0:
-
-        benign_rate = (
-            total_benign
-            / total_flows
-            * 100
-        )
-
-    else:
-
-        benign_rate = 0
-
-    st.metric(
-        "Benign Rate",
-        f"{benign_rate:.2f}%",
-    )
-
-
-# ============================================================
-# ERROR DISPLAY
-# ============================================================
-
-last_error = safe_get(
-    "last_error",
-    None,
+model_ok = (
+    nids.binary_model is not None
+    and nids.multi_model is not None
 )
 
-if last_error:
+scaler_ok = nids.scaler is not None
 
-    st.error(
-        f"Live monitoring error: {last_error}"
+h1, h2, h3 = st.columns(3)
+
+with h1:
+    st.markdown(
+        f"""
+        <div class="health">
+            <b>📡 Packet Capture</b><br><br>
+            {"🟢 ONLINE" if running() else "🟡 STOPPED"}<br>
+            <span class="muted">{interface}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
+with h2:
+    st.markdown(
+        f"""
+        <div class="health">
+            <b>🤖 AI Models</b><br><br>
+            {"🟢 READY" if model_ok else "🔴 ERROR"}<br>
+            <span class="muted">
+                Binary + Multi-class Transformer
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-processing_error = st.session_state.get(
-    "last_processing_error",
-    None,
+with h3:
+    st.markdown(
+        f"""
+        <div class="health">
+            <b>⚙️ Preprocessing</b><br><br>
+            {"🟢 READY" if scaler_ok else "🔴 ERROR"}<br>
+            <span class="muted">
+                61-feature StandardScaler
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+if nids.last_error:
+    st.error("Backend error: " + nids.last_error)
+
+st.caption(
+    "AI-NIDS • Real-time network intrusion detection • "
+    "Use only on networks you are authorized to monitor."
 )
 
-if processing_error:
 
-    st.error(
-        f"Processing error: {processing_error}"
-    )
+# -----------------------------
+# Automatic refresh
+# -----------------------------
 
-
-# ============================================================
-# AUTO REFRESH
-# ============================================================
-
-if running:
-
-    time.sleep(1.5)
-
+if running():
+    time.sleep(2)
     st.rerun()
