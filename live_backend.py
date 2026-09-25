@@ -32,6 +32,7 @@ LAB_TARGET = "juice-shop"
 LAB_TARGET_URL = "http://juice-shop:3000"
 
 BINARY_THRESHOLD = 0.80
+LAB_BACKEND_VERSION = "LAB-ISOLATED-2.0"
 
 CLASSES = [
     "BENIGN",
@@ -378,30 +379,34 @@ class LiveNIDS:
         self.capture_interface = "Docker Lab / nids-client"
         self.last_lab_message = "Starting isolated Docker lab capture..."
 
-        # tcpdump writes raw PCAP to stdout; Python saves it on the host.
-        # -U makes packet-buffered output, useful for live capture.
+        # Capture INSIDE nids-client and rotate PCAPs every 5 seconds.
+        # This keeps the lab independent of Windows/Npcap and produces
+        # completed PCAP files that CICFlowMeter can process safely.
+        subprocess.run(
+            ["docker", "exec", LAB_CLIENT, "sh", "-c",
+             "rm -f /tmp/ai-nids-lab-*.pcap"],
+            capture_output=True,
+            timeout=10,
+        )
+
         command = [
             "docker", "exec", LAB_CLIENT,
             "tcpdump",
             "-i", "eth0",
             "-U",
             "-s", "0",
-            "-w", "-",
+            "-G", "5",
+            "-w", "/tmp/ai-nids-lab-%Y%m%d-%H%M%S.pcap",
+            "net", "172.18.0.0/16",
         ]
 
         try:
-            stdout_file = open(LAB_PCAP, "wb")
             self.lab_capture_process = subprocess.Popen(
                 command,
-                stdout=stdout_file,
+                stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
             )
-            self._lab_stdout_file = stdout_file
         except Exception as exc:
-            try:
-                stdout_file.close()
-            except Exception:
-                pass
             self.lab_capture_process = None
             raise RuntimeError(f"Could not start Docker lab capture: {exc}")
 
@@ -421,17 +426,19 @@ class LiveNIDS:
                 + (error_text.strip() or "Check tcpdump inside nids-client.")
             )
 
+        self.last_lab_message = (
+            "Docker lab capture is active. Waiting for completed PCAP chunks..."
+        )
+
     def _copy_completed_lab_pcaps(self):
-        """
-        Copy completed 5-second PCAP chunks from the Docker client.
-        The newest file is skipped because tcpdump may still be writing it.
+        """Copy completed rotating PCAPs from nids-client.
+
+        The newest PCAP is skipped because tcpdump may still be writing it.
         """
         try:
             result = subprocess.run(
-                [
-                    "docker", "exec", LAB_CLIENT, "sh", "-c",
-                    "ls -1t /tmp/ai-nids-lab-*.pcap 2>/dev/null || true",
-                ],
+                ["docker", "exec", LAB_CLIENT, "sh", "-c",
+                 "ls -1t /tmp/ai-nids-lab-*.pcap 2>/dev/null || true"],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -444,20 +451,15 @@ class LiveNIDS:
             return []
 
         copied = []
-
-        # Skip newest/current chunk.
         for remote in remote_files[1:]:
             if remote in self.lab_capture_files:
                 continue
 
             local = LIVE_DIR / Path(remote).name
-
             try:
                 cp = subprocess.run(
                     ["docker", "cp", f"{LAB_CLIENT}:{remote}", str(local)],
-                    capture_output=True,
-                    text=True,
-                    timeout=20,
+                    capture_output=True, text=True, timeout=20,
                 )
                 if cp.returncode != 0:
                     continue
@@ -467,8 +469,7 @@ class LiveNIDS:
                     copied.append(local)
                     subprocess.run(
                         ["docker", "exec", LAB_CLIENT, "rm", "-f", remote],
-                        capture_output=True,
-                        timeout=10,
+                        capture_output=True, timeout=10,
                     )
             except Exception:
                 continue
@@ -544,10 +545,19 @@ class LiveNIDS:
         self.last_lab_message = f"Processed {pcap_path.name}"
 
         try:
-            pcap_path.unlink()
-            tmp_csv.unlink()
-        except Exception:
-            pass
+            debug_dir = BASE / "debug_pcaps"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+
+            debug_pcap = debug_dir / pcap_path.name
+            debug_csv = debug_dir / tmp_csv.name
+
+            pcap_path.replace(debug_pcap)
+            tmp_csv.replace(debug_csv)
+
+            self.last_lab_message = f"Processed {pcap_path.name} → saved in debug_pcaps"
+        except Exception as e:
+             self.last_lab_message = f"Processed {pcap_path.name}, but debug save failed: {e}"
+            
 
     def _process_lab_chunks(self):
         for pcap in self._copy_completed_lab_pcaps():
@@ -681,6 +691,23 @@ class LiveNIDS:
 
         new = df.iloc[self.processed_rows:].copy()
 
+        # Hard isolation guard: LAB mode may only expose Docker-lab flows.
+        # This prevents stale REAL/Wi-Fi rows from leaking into the LAB UI.
+        if self.capture_mode == "LAB":
+            if "src_ip" in new.columns and "dst_ip" in new.columns:
+                src = new["src_ip"].astype(str)
+                dst = new["dst_ip"].astype(str)
+                lab_mask = (
+                    src.str.startswith("172.18.")
+                    & dst.str.startswith("172.18.")
+                )
+                new = new.loc[lab_mask].copy()
+
+            # Advance the cursor even when foreign rows were discarded.
+            self.processed_rows = len(df)
+            if new.empty:
+                return
+
         try:
             results = self.predict(self.make_features(new))
         except Exception as exc:
@@ -788,8 +815,19 @@ class LiveNIDS:
 
     @property
     def lab_action_running(self):
-        p = getattr(self, "lab_action_process", None)
-        return bool(p is not None and p.poll() is None)
+      p = getattr(self, "lab_action_process", None)
+
+      if p is None:
+       return False
+
+      if p.poll() is None:
+        return True
+
+     # Process has finished — clean up the state.
+        self.lab_action_process = None
+        self.lab_action_name = ""
+
+        return False
 
     def stop_lab_action(self):
         p = getattr(self, "lab_action_process", None)
